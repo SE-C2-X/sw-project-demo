@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8">
+  <title>AI自动出题</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body {
+      background: #f6f8fa;
+      font-family: 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Arial', sans-serif;
+      margin: 0;
+      padding: 0;
+    }
+    .container {
+      max-width: 700px;
+      margin: 40px auto 0 auto;
+      background: #fff;
+      border-radius: 12px;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.08);
+      padding: 32px 28px 28px 28px;
+    }
+    h2 {
+      text-align: center;
+      color: #222;
+      margin-bottom: 28px;
+      letter-spacing: 2px;
+    }
+    label {
+      font-weight: 500;
+      color: #333;
+      margin-bottom: 6px;
+      display: block;
+    }
+    textarea, input[type="file"] {
+      width: 100%;
+      box-sizing: border-box;
+      margin-bottom: 18px;
+      font-size: 15px;
+      border-radius: 6px;
+      border: 1px solid #d0d7de;
+      padding: 10px;
+      background: #f9f9f9;
+      transition: border 0.2s;
+    }
+    textarea:focus, input[type="file"]:focus {
+      border: 1.5px solid #409eff;
+      outline: none;
+      background: #fff;
+    }
+    .btn-group {
+      display: flex;
+      gap: 2em; /* 或 28px */
+      margin-bottom: 18px;
+      justify-content: center;
+    }
+    button {
+      background: #409eff;
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      padding: 10px 22px;
+      font-size: 15px;
+      cursor: pointer;
+      transition: background 0.2s;
+      font-weight: 500;
+    }
+    button:disabled {
+      background: #bcdcff;
+      cursor: not-allowed;
+    }
+    .scroll-box {
+      border: 1px solid #e0e0e0;
+      margin: 10px 0 18px 0;
+      padding: 12px;
+      height: 180px;
+      overflow-y: auto;
+      background: #f8fafc;
+      border-radius: 6px;
+      font-size: 15px;
+      color: #222;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+    .section-title {
+      margin: 18px 0 6px 0;
+      font-size: 16px;
+      color: #409eff;
+      font-weight: 600;
+      letter-spacing: 1px;
+    }
+    @media (max-width: 800px) {
+      .container { padding: 18px 6px; }
+      h2 { font-size: 22px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h2>AI自动出题</h2>
+    <label for="user_prompt">你的出题要求：</label>
+    <textarea id="user_prompt" rows="3" placeholder="例如：请根据以下内容生成3道判断题"></textarea>
+
+    <label for="file_input">上传文件（支持txt、docx、pdf、pptx）：</label>
+    <input type="file" id="file_input" accept=".txt,.docx,.pdf,.pptx">
+
+    <div class="btn-group">
+      <button onclick="uploadFile()">上传文件</button>
+      <button id="preview_btn" onclick="previewFile()" disabled>预览文件内容</button>
+      <button id="generate_btn" onclick="startGenerate()">开始生成</button>
+    </div>
+
+    <div id="preview_container" style="display:none;">
+      <div class="section-title">文件内容预览：</div>
+      <div class="scroll-box" id="file_preview"></div>
+    </div>
+
+    <div class="section-title">AI思考过程：</div>
+    <div class="scroll-box" id="ai_thinking"></div>
+    <div class="section-title">AI最终回复：</div>
+    <div class="scroll-box" id="ai_output"></div>
+  </div>
+
+  <script>
+    let uploadedFilename = '';
+
+    function uploadFile() {
+      const fileInput = document.getElementById('file_input');
+      if (!fileInput.files.length) {
+        alert('请先选择文件');
+        return;
+      }
+      const formData = new FormData();
+      formData.append('file', fileInput.files[0]);
+      fetch('http://localhost:5000/api/upload_file', {
+        method: 'POST',
+        body: formData
+      })
+      .then(res => res.json())
+      .then(data => {
+        uploadedFilename = data.filename;
+        alert('文件上传成功！');
+        document.getElementById('preview_btn').disabled = false;
+        document.getElementById('generate_btn').disabled = false;
+      })
+      .catch(() => {
+        uploadedFilename = '';
+        alert('文件上传失败');
+      });
+    }
+
+    function previewFile() {
+      if (!uploadedFilename) {
+        alert('请先上传文件');
+        return;
+      }
+      fetch('http://localhost:5000/api/preview_file?filename=' + encodeURIComponent(uploadedFilename))
+        .then(res => res.json())
+        .then(data => {
+          document.getElementById('preview_container').style.display = '';
+          document.getElementById('file_preview').textContent = data.content || '文件内容为空';
+        });
+    }
+
+    function startGenerate() {
+      const userPrompt = document.getElementById('user_prompt').value;
+      // 允许无文件上传
+      // if (!uploadedFilename) {
+      //   alert('请先上传文件');
+      //   return;
+      // }
+      document.getElementById('ai_thinking').textContent = '';
+      document.getElementById('ai_output').textContent = '';
+      let result = '';
+      fetch('http://localhost:5000/api/stream_generate', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          user_prompt: userPrompt,
+          filename: uploadedFilename // 可能为空字符串
+        })
+      })
+      .then(res => {
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder('utf-8');
+        function read() {
+          reader.read().then(({done, value}) => {
+            if (done) {
+              document.getElementById('ai_output').textContent = result;
+              return;
+            }
+            const chunk = decoder.decode(value);
+            result += chunk;
+            document.getElementById('ai_thinking').textContent = result;
+            document.getElementById('ai_thinking').scrollTop = document.getElementById('ai_thinking').scrollHeight;
+            read();
+          });
+        }
+        read();
+      });
+    }
+  </script>
+</body>
+</html>
